@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bencode"
+version = "0.1.0"
+description = "终端 AI 编程助手，对标 Claude Code"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.30.0",
+    "pyyaml>=6.0",
+    "textual>=0.80.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+bencode = "bencode.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bencode"]

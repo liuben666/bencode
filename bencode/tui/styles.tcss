@@ -1,0 +1,154 @@
+/* BenCode TUI 样式 */
+
+Screen {
+    background: $surface;
+}
+
+/* Provider 选择界面 */
+.provider-list {
+    width: 60;
+    height: auto;
+    max-height: 20;
+    border: thick $accent;
+    padding: 1 2;
+}
+
+.provider-list Item {
+    padding: 0 1;
+}
+
+.provider-list Item.-active {
+    text-style: bold;
+    background: $accent 20%;
+}
+
+/* 对话界面布局 */
+#chat-container {
+    layout: vertical;
+    height: 1fr;
+}
+
+/* 消息列表 */
+#message-list {
+    height: 1fr;
+    padding: 0 1;
+    scrollbar-size: 1 1;
+}
+
+/* 用户消息样式 */
+.user-message {
+    background: $primary 15%;
+    margin: 1 0;
+    padding: 1 2;
+    border-left: thick $primary;
+}
+
+.user-message .label {
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* AI 消息样式 */
+.ai-message {
+    margin: 1 0;
+    padding: 1 2;
+}
+
+.ai-message .label {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* 输入区 */
+.input-area {
+    height: auto;
+    max-height: 12;
+    dock: bottom;
+    border-top: thick $accent;
+    padding: 0 1;
+}
+
+#user-input {
+    height: 3;
+}
+
+/* 输入工具栏 */
+#input-toolbar {
+    height: 3;
+    padding: 0 1;
+}
+
+#thinking-btn {
+    width: auto;
+    height: 1;
+    margin: 0;
+}
+
+#thinking-btn.thinking-on {
+    background: $accent 30%;
+    color: $text;
+    text-style: bold;
+}
+
+#thinking-btn.thinking-off {
+    color: $text-muted;
+}
+
+#send-btn {
+    dock: right;
+    width: 3;
+    height: 1;
+    margin: 0;
+    min-width: 3;
+}
+
+/* 状态栏 */
+#status-bar {
+    dock: bottom;
+    height: 1;
+    background: $primary;
+    color: $text;
+    padding: 0 1;
+}
+
+/* Thinking 折叠区块 */
+.thinking-block {
+    margin: 0 0 1 0;
+}
+
+.thinking-block Collapsible {
+    border-left: thick $warning;
+    padding-left: 1;
+}
+
+.thinking-block Collapsible CollapsibleTitle {
+    color: $warning;
+    text-style: italic;
+}
+
+.thinking-block Collapsible .collapsible-content {
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* 错误消息 */
+.error-message {
+    color: $error;
+    padding: 1 2;
+    border-left: thick $error;
+}
+
+/* 历史会话列表 */
+.history-list {
+    width: 80;
+    height: auto;
+    max-height: 25;
+    border: thick $accent;
+    padding: 1 2;
+}
+
+.history-list Item {
+    padding: 0 1;
+}
