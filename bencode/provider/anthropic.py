@@ -27,8 +27,6 @@ class AnthropicProvider(BaseProvider):
             api_key=config.api_key,
             base_url=config.base_url,
         )
-        # 保存最近一次 assistant 回复的 thinking signature（多轮传递用）
-        self._last_thinking_signature: Optional[str] = None
 
     @property
     def provider_name(self) -> str:
@@ -45,7 +43,7 @@ class AnthropicProvider(BaseProvider):
         - role: "user" | "assistant"
         - content: 字符串或内容块列表
         - thinking 块在 assistant 消息中需以 content block 形式传递
-          （多轮对话时需包含 signature 字段以保证推理链连续性）
+          （多轮对话时必须包含 signature 字段以保证推理链连续性）
         """
         result = []
         for msg in messages:
@@ -54,16 +52,17 @@ class AnthropicProvider(BaseProvider):
             elif msg.role == Role.ASSISTANT:
                 content_blocks = []
                 # 如果有 thinking 内容，需要作为 thinking block 传入
+                # 多轮对话必须传 signature，否则 API 会拒绝请求
                 if msg.thinking_text:
                     thinking_block: dict = {
                         "type": "thinking",
                         "thinking": msg.thinking_text,
                     }
-                    # 如果有保存的 signature，加入以保持多轮推理连续性
-                    if hasattr(msg, '_thinking_signature') and msg._thinking_signature:
-                        thinking_block["signature"] = msg._thinking_signature
+                    if msg.thinking_signature:
+                        thinking_block["signature"] = msg.thinking_signature
                     content_blocks.append(thinking_block)
-                content_blocks.append({"type": "text", "text": msg.text})
+                if msg.text:
+                    content_blocks.append({"type": "text", "text": msg.text})
                 result.append({"role": "assistant", "content": content_blocks})
         return result
 
@@ -76,14 +75,8 @@ class AnthropicProvider(BaseProvider):
         使用 AsyncAnthropic 的 messages.stream() 上下文管理器，
         遍历流式事件，将 thinking 和 text 事件转换为统一的 StreamChunk。
 
-        参考：Anthropic Python SDK 官方示例
-        - thinking 事件：event.type == "thinking"，event.thinking 获取思考增量
-        - text 事件：event.type == "text"，event.text 获取正文增量
-        - content_block_stop 事件：可获取完整 content_block（含 signature）
-
-        对于 thinking block，SDK 的 MessageStream 高层封装：
-        - event.type == "thinking" 时，event.thinking 为增量文本
-        - 流结束后可通过 get_final_message() 获取完整 thinking block（含 signature）
+        thinking block 的 signature 通过 content_block_stop 事件捕获，
+        并在 done chunk 的 metadata 中返回（多轮对话必须回传）。
         """
         try:
             # 构建请求参数
@@ -105,12 +98,12 @@ class AnthropicProvider(BaseProvider):
                     kwargs["max_tokens"] = budget_tokens + 4096
 
             thinking_accumulated = ""  # 累积完整 thinking 文本
-            text_accumulated = ""  # 累积完整正文文本
+            thinking_signature: Optional[str] = None  # 多轮传递用
 
             async with self._client.messages.stream(**kwargs) as stream:
                 async for event in stream:
                     if event.type == "thinking":
-                        # 思考内容增量
+                        # 思考内容增量，立即 yield（让 UI 立刻显示思考中）
                         thinking_accumulated += event.thinking
                         yield StreamChunk(
                             type="thinking",
@@ -118,22 +111,27 @@ class AnthropicProvider(BaseProvider):
                         )
                     elif event.type == "text":
                         # 正文内容增量
-                        text_accumulated += event.text
                         yield StreamChunk(
                             type="text",
                             text=event.text,
                         )
                     elif event.type == "content_block_stop":
-                        # 内容块结束时，检查是否是 thinking block 以获取 signature
+                        # 抓取 thinking block 的 signature（多轮对话必须）
                         if hasattr(event, "content_block") and event.content_block:
                             block = event.content_block
-                            if hasattr(block, "type") and block.type == "thinking":
-                                # 保存 signature 用于多轮对话
-                                if hasattr(block, "signature"):
-                                    self._last_thinking_signature = block.signature
+                            if (
+                                hasattr(block, "type")
+                                and block.type == "thinking"
+                                and hasattr(block, "signature")
+                                and block.signature
+                            ):
+                                thinking_signature = block.signature
 
-            # 流结束
-            yield StreamChunk(type="done")
+            # 流结束：通过 done chunk 的 metadata 传递 signature
+            yield StreamChunk(
+                type="done",
+                metadata={"thinking_signature": thinking_signature} if thinking_signature else {},
+            )
 
         except anthropic.APIConnectionError as e:
             raise ProviderError(f"Anthropic API 连接失败: {e}") from e

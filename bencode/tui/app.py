@@ -10,6 +10,7 @@ from bencode.config.loader import load_config, ConfigError
 from bencode.config.schema import AppConfig, ProviderConfig
 from bencode.session.manager import SessionManager
 from bencode.tui.screens.provider_select import ProviderSelectScreen
+from bencode.tui.screens.session_select import SessionSelectScreen
 from bencode.tui.screens.chat import ChatScreen
 
 
@@ -96,6 +97,26 @@ class BenCodeApp(App):
         """用户在 Provider 选择界面选中了某个 provider"""
         self.pop_screen()  # 关闭选择界面
         self._enter_chat(event.provider_config)
+
+    def on_session_select_screen_selected(
+        self, event: "SessionSelectScreen.Selected"
+    ) -> None:
+        """用户在会话选择界面选中了某个历史会话
+
+        关闭选择界面，用选中会话替换当前对话界面。
+        provider 优先用会话记录的名称解析，找不到则沿用当前 provider。
+        """
+        session = event.session
+        provider_config = (
+            self._config.get_provider(session.provider_name)
+            or event.fallback_provider
+        )
+        chat_screen = ChatScreen(
+            provider_config=provider_config,
+            session=session,
+        )
+        self.pop_screen()  # 关闭会话选择界面
+        self.switch_screen(chat_screen)  # 替换当前对话界面
 
     def on_chat_screen_exit(self, event: ChatScreen.Exit) -> None:
         """用户在对话界面请求退出"""

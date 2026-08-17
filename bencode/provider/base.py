@@ -23,6 +23,7 @@ class MessageContent:
     role: Role
     text: str
     thinking_text: Optional[str] = None  # extended thinking 内容，仅 assistant 可能有
+    thinking_signature: Optional[str] = None  # thinking block 的 signature（多轮对话必须）
 
 
 @dataclass
@@ -32,6 +33,7 @@ class StreamChunk:
     # chunk 类型：text 为正文，thinking 为思考内容，done 表示流结束
     type: str  # "text" | "thinking" | "done"
     text: str = ""
+    metadata: Optional[dict] = None  # 额外元数据（如 thinking signature）
 
 
 class BaseProvider(ABC):

@@ -28,15 +28,20 @@ Screen {
     height: 1fr;
 }
 
-/* 消息列表 */
-#message-list {
+/* 消息列表（垂直滚动区） */
+.message-list {
     height: 1fr;
     padding: 0 1;
+    /* 竖直滚动条样式 */
     scrollbar-size: 1 1;
+    scrollbar-color: $accent;
+    scrollbar-background: $surface;
+    scrollbar-corner-color: $surface;
 }
 
-/* 用户消息样式 */
+/* 用户消息样式（height: auto 关键：Vertical 默认 1fr 会瓜分视口高度） */
 .user-message {
+    height: auto;
     background: $primary 15%;
     margin: 1 0;
     padding: 1 2;
@@ -49,8 +54,9 @@ Screen {
     margin-bottom: 1;
 }
 
-/* AI 消息样式 */
+/* AI 消息样式（同上，必须 height: auto） */
 .ai-message {
+    height: auto;
     margin: 1 0;
     padding: 1 2;
 }
@@ -64,7 +70,7 @@ Screen {
 /* 输入区 */
 .input-area {
     height: auto;
-    max-height: 12;
+    max-height: 14;
     dock: bottom;
     border-top: thick $accent;
     padding: 0 1;
@@ -76,32 +82,34 @@ Screen {
 
 /* 输入工具栏 */
 #input-toolbar {
-    height: 3;
+    height: auto;
     padding: 0 1;
 }
 
 #thinking-btn {
     width: auto;
-    height: 1;
-    margin: 0;
+    background: $accent 20%;
+    color: $text;
+    text-style: bold;
+    border: tall $accent;
 }
 
 #thinking-btn.thinking-on {
-    background: $accent 30%;
+    background: $accent 40%;
     color: $text;
     text-style: bold;
 }
 
 #thinking-btn.thinking-off {
+    background: $surface;
     color: $text-muted;
+    text-style: none;
 }
 
 #send-btn {
     dock: right;
-    width: 3;
-    height: 1;
-    margin: 0;
-    min-width: 3;
+    width: 5;
+    min-width: 5;
 }
 
 /* 状态栏 */
@@ -113,8 +121,9 @@ Screen {
     padding: 0 1;
 }
 
-/* Thinking 折叠区块 */
+/* Thinking 折叠区块（Vertical 子类，必须 height: auto） */
 .thinking-block {
+    height: auto;
     margin: 0 0 1 0;
 }
 

@@ -21,6 +21,7 @@ from bencode.session.manager import SessionManager
 from bencode.session.models import Session
 from bencode.tui.widgets.input_area import InputArea
 from bencode.tui.widgets.message_list import MessageList
+from bencode.tui.screens.session_select import SessionSelectScreen
 
 
 class ChatScreen(Screen):
@@ -81,7 +82,7 @@ class ChatScreen(Screen):
         yield Static(self._build_status_text(), id="status-bar")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """初始化 Provider 和会话"""
         # 创建 Provider 实例
         self._provider = create_provider(self._provider_config)
@@ -104,11 +105,14 @@ class ChatScreen(Screen):
                 if msg.role == Role.USER:
                     message_list.add_user_message(msg.text)
                 elif msg.role == Role.ASSISTANT:
-                    message_list.start_ai_message()
+                    # start_ai_message 是 async，必须 await（否则 widget 未真正挂载，
+                    # 后续 append_ai_text 更新的是未挂载的 widget，内容不可见/不可选）
+                    await message_list.start_ai_message()
                     if msg.thinking_text:
                         message_list.add_thinking_block(msg.thinking_text)
                     message_list.append_ai_text(msg.text)
-                    message_list.finish_ai_message()
+                    # finish_ai_message 是 async，必须 await
+                    await message_list.finish_ai_message()
 
         # 聚焦输入框
         self.query_one(InputArea).focus_input()
@@ -173,41 +177,79 @@ class ChatScreen(Screen):
         """处理内置命令"""
         cmd = command.strip().lower()
         message_list = self.query_one(MessageList)
-
         if cmd == "/history":
-            # 列出最近会话
-            sessions = self._session_manager.list_recent_sessions(limit=10)
+            # 弹出会话选择界面（↑↓ 选择，Enter/鼠标点击进入）
+            sessions = self._session_manager.list_recent_sessions(limit=15)
+            # 过滤掉没有任何消息的空会话
+            sessions = [s for s in sessions if s.messages]
             if not sessions:
                 message_list.add_error_message("没有历史会话")
                 return
 
-            lines = ["📅 最近会话："]
-            for s in sessions:
-                marker = " 👈" if s.session_id == self._session.session_id else ""
-                lines.append(
-                    f"  • [{s.session_id}] {s.provider_name} · {s.created_at[:19]}{marker}"
+            self.app.push_screen(
+                SessionSelectScreen(
+                    sessions=sessions,
+                    current_session_id=self._session.session_id,
+                    fallback_provider=self._provider_config,
                 )
-            # 用 Markdown 渲染
-            message_list.start_ai_message()
-            message_list.append_ai_text("\n".join(lines))
-            message_list.finish_ai_message()
+            )
 
         elif cmd in ("/quit", "/exit", "/q"):
             self.post_message(self.Exit())
 
+        elif cmd == "/copy":
+            # 复制最近一条 AI 回复到剪贴板
+            last_ai = None
+            for m in reversed(self._session.messages):
+                if m.role == Role.ASSISTANT and m.text.strip():
+                    last_ai = m.text
+                    break
+            if last_ai is None:
+                message_list.add_error_message("没有可复制的 AI 回复")
+                return
+            self._copy_text_to_clipboard(last_ai)
+            message_list.add_error_message(
+                f"✅ 已复制最近一条 AI 回复（{len(last_ai)} 字符）到剪贴板"
+            )
+
         elif cmd == "/help":
             help_text = (
                 "## BenCode 命令\n\n"
-                "- `/history` - 列出最近会话\n"
+                "- `/history` - 选择历史会话继续聊天（↑↓/Enter/鼠标）\n"
+                "- `/copy` - 复制最近一条 AI 回复到剪贴板\n"
                 "- `/quit` - 退出 BenCode\n"
-                "- `/help` - 显示帮助\n"
+                "- `/help` - 显示帮助\n\n"
+                "## 复制文字技巧\n\n"
+                "TUI 程序会捕获鼠标事件，终端原生拖选会被拦截。\n"
+                "按住 **Shift** 再拖动鼠标即可原生选择复制。"
             )
-            message_list.start_ai_message()
+            await message_list.start_ai_message()
             message_list.append_ai_text(help_text)
-            message_list.finish_ai_message()
+            await message_list.finish_ai_message()
 
         else:
             message_list.add_error_message(f"未知命令: {command}，输入 /help 查看可用命令")
+
+    def _copy_text_to_clipboard(self, text: str) -> None:
+        """复制文本到系统剪贴板（双保险）
+
+        1. OSC 52 转义序列（Textual 内置，Windows Terminal 等现代终端支持）
+        2. Windows clip 命令（更可靠的本地剪贴板写入，支持中文）
+        """
+        # 方式 1：OSC 52
+        self.app.copy_to_clipboard(text)
+        # 方式 2：Windows clip（UTF-16 LE + BOM 保证中文正确）
+        try:
+            import subprocess
+
+            data = b"\xff\xfe" + text.encode("utf-16-le")
+            subprocess.run(
+                ["clip"],
+                input=data,
+                creationflags=0x08000000,  # CREATE_NO_WINDOW，避免闪黑窗
+            )
+        except Exception:
+            pass
 
     @work
     async def _stream_ai_response(self) -> None:
@@ -220,13 +262,12 @@ class ChatScreen(Screen):
             return
 
         message_list = self.query_one(MessageList)
-        message_list.clear_ai_buffer()
-        message_list.start_ai_message()
+        await message_list.start_ai_message()
 
         # 本轮流式回复的缓冲区
         thinking_accumulated = ""  # 完整 thinking 文本
         text_accumulated = ""  # 完整正文文本
-        thinking_displayed = False  # thinking 区块是否已展示
+        thinking_signature: Optional[str] = None  # 多轮传递的 signature
 
         try:
             # 使用异步迭代器获取流式响应
@@ -234,15 +275,14 @@ class ChatScreen(Screen):
                 if chunk.type == "thinking":
                     # 累积 thinking 内容
                     thinking_accumulated += chunk.text
+                    # 立即显示折叠的 thinking 区块（让用户看到"思考中"）
+                    # 注意：传增量 chunk.text，ThinkingBlock 内部自行累加，
+                    # 传累积文本会导致内容指数级重复
+                    message_list.add_thinking_block(chunk.text)
                     # 让出事件循环，保持 UI 响应
                     await asyncio.sleep(0)
 
                 elif chunk.type == "text":
-                    # 如果之前有 thinking 且还未显示，先显示 thinking 区块
-                    if thinking_accumulated and not thinking_displayed:
-                        message_list.add_thinking_block(thinking_accumulated)
-                        thinking_displayed = True
-
                     # 追加正文
                     text_accumulated += chunk.text
                     message_list.append_ai_text(chunk.text)
@@ -250,33 +290,34 @@ class ChatScreen(Screen):
                     await asyncio.sleep(0)
 
                 elif chunk.type == "done":
-                    # 如果有 thinking 但未显示（极端情况：只有 thinking 没有正文）
-                    if thinking_accumulated and not thinking_displayed:
-                        message_list.add_thinking_block(thinking_accumulated)
-                        thinking_displayed = True
+                    # 从 done chunk 提取 signature（多轮对话必须回传）
+                    if chunk.metadata and chunk.metadata.get("thinking_signature"):
+                        thinking_signature = chunk.metadata["thinking_signature"]
 
                     # 保存 AI 回复到会话
                     ai_msg = MessageContent(
                         role=Role.ASSISTANT,
                         text=text_accumulated,
                         thinking_text=thinking_accumulated if thinking_accumulated else None,
+                        thinking_signature=thinking_signature,
                     )
                     self._session_manager.add_message_and_save(self._session, ai_msg)
 
-                    message_list.finish_ai_message()
+                    # 异步完成 UI 渲染（必须 await）
+                    await message_list.finish_ai_message()
 
         except ProviderError as e:
             message_list.add_error_message(str(e))
-            message_list.finish_ai_message()
+            await message_list.finish_ai_message()
 
         except asyncio.CancelledError:
             # 用户主动取消流式输出
-            message_list.finish_ai_message()
+            await message_list.finish_ai_message()
             raise
 
         except Exception as e:
             message_list.add_error_message(f"未知错误: {e}")
-            message_list.finish_ai_message()
+            await message_list.finish_ai_message()
 
         finally:
             self._is_streaming = False

@@ -2,38 +2,36 @@
 
 负责渲染对话消息列表，支持：
 - 用户消息和 AI 消息的差异化展示
-- AI 回复使用 Markdown 组件渲染富文本
+- AI 回复使用 Rich Markdown 渲染富文本（单个 Static 组件，轻量稳定）
 - Thinking 内容使用 ThinkingBlock 组件折叠展示
-- 流式追加更新（流式期间用 Static + Rich Markdown 轻量渲染，
-  流结束后替换为 Textual Markdown 做完整渲染）
+- 流式追加更新
+
+渲染策略（关键）：
+- 每条消息的容器必须 height: auto，否则 Vertical 默认 1fr 会瓜分视口高度，
+  多条长消息会被挤压裁剪
+- 最终渲染用 Static + RichMarkdown（一个 widget 渲染全部内容），
+  而非 Textual Markdown 组件（后者为每个 markdown 元素创建子 widget，
+  长对话会产生数千 widget 导致布局崩溃）
 """
 
 from rich.markdown import Markdown as RichMarkdown
-from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Markdown, Static
+from textual.widgets import Static
 
 from bencode.tui.widgets.thinking_block import ThinkingBlock
 
 
 class MessageList(VerticalScroll):
-    """对话消息列表展示区
-
-    所有对话消息都在此容器中展示。
-    用户消息用带背景的 Static 展示，AI 回复用 Markdown 组件渲染。
-
-    流式策略：
-    - 流式期间使用 Static + rich.markdown.Markdown 轻量渲染（sync update，不阻塞）
-    - 流结束后替换为 Textual Markdown 组件做完整富文本渲染
-    """
+    """对话消息列表展示区（垂直滚动）"""
 
     DEFAULT_CLASSES = "message-list"
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._current_ai_static: Static | None = None  # 流式期间的 Static 组件
+        self._current_ai_static: Static | None = None  # 当前 AI 消息的内容组件
         self._current_ai_container: Vertical | None = None
-        self._ai_text_buffer: str = ""  # 流式追加时的文本缓冲区
+        self._ai_text_buffer: str = ""  # 流式追加的文本缓冲区
+        self._thinking_block: ThinkingBlock | None = None  # 当前 thinking 组件
 
     def add_user_message(self, text: str) -> None:
         """添加一条用户消息到列表"""
@@ -43,70 +41,75 @@ class MessageList(VerticalScroll):
         container.mount(Static(text))
         self.scroll_end(animate=False)
 
-    def start_ai_message(self) -> None:
+    async def start_ai_message(self) -> None:
         """开始一条新的 AI 回复
 
-        创建 AI 消息容器和 Static 组件（流式期间用轻量渲染）。
+        异步实现：必须 await mount，否则后续 update 调用时 widget 未真正挂载，
+        渲染内容会"消失"或无法被鼠标选中。
         """
+        import asyncio as _asyncio
+
         self._ai_text_buffer = ""
+        self._thinking_block = None
         container = Vertical(classes="ai-message")
-        self.mount(container)
-        container.mount(Static("🤖 BenCode", classes="label"))
+        await self.mount(container)
+        await container.mount(Static("🤖 BenCode", classes="label"))
         static = Static("", classes="ai-content")
-        container.mount(static)
+        await container.mount(static)
 
         self._current_ai_static = static
         self._current_ai_container = container
+        # 让出事件循环，确保 layout 完成
+        await _asyncio.sleep(0)
         self.scroll_end(animate=False)
 
     def add_thinking_block(self, thinking_text: str) -> None:
-        """在当前 AI 回复中添加 Thinking 折叠区块"""
+        """在当前 AI 回复中添加/更新 Thinking 折叠区块
+
+        第一次调用时创建 ThinkingBlock 并 mount；
+        后续调用通过 update_text() 增量更新同一个组件。
+        """
         if self._current_ai_container is None or self._current_ai_static is None:
             return
-        thinking = ThinkingBlock(thinking_text)
-        # 插入到内容组件之前
-        self._current_ai_container.mount(thinking, before=self._current_ai_static)
+        if self._thinking_block is None:
+            self._thinking_block = ThinkingBlock(thinking_text)
+            self._current_ai_container.mount(
+                self._thinking_block, before=self._current_ai_static
+            )
+        else:
+            self._thinking_block.update_text(thinking_text)
         self.scroll_end(animate=False)
 
     def append_ai_text(self, text: str) -> None:
         """追加流式文本到当前 AI 回复
 
-        流式期间使用 Static + rich.markdown.Markdown 轻量渲染。
-        Static.update() 是同步操作，仅设置 renderable 并 refresh，不阻塞事件循环。
+        流式期间用纯文本渲染（最稳定，增量快），
+        流结束时在 finish_ai_message 里切换为 Rich Markdown。
         """
         if self._current_ai_static is None:
             return
         self._ai_text_buffer += text
-        self._current_ai_static.update(RichMarkdown(self._ai_text_buffer))
+        self._current_ai_static.update(self._ai_text_buffer)
         self.scroll_end(animate=False)
 
-    def finish_ai_message(self) -> None:
+    async def finish_ai_message(self) -> None:
         """结束当前 AI 回复
 
-        将流式期间的 Static 替换为 Textual Markdown 组件，做完整富文本渲染。
+        用 Rich Markdown 完成最终渲染。
+        关键：直接更新同一个 Static 组件的 renderable，不 mount/remove widget，
+        避免 widget 树 churn（多次对话后布局损坏的根源）。
         """
-        if (
-            self._current_ai_static is not None
-            and self._current_ai_container is not None
-        ):
-            # 移除流式期间的 Static
-            old_static = self._current_ai_static
-            # 创建 Textual Markdown 做最终渲染
-            markdown = Markdown(self._ai_text_buffer or "", classes="ai-content")
-            # 用 Markdown 替换 Static
-            self._current_ai_container.mount(markdown, before=old_static)
-            old_static.remove()
+        if self._current_ai_static is not None:
+            self._current_ai_static.update(RichMarkdown(self._ai_text_buffer or ""))
+            self.scroll_end(animate=False)
 
         self._ai_text_buffer = ""
         self._current_ai_static = None
         self._current_ai_container = None
+        self._thinking_block = None
 
     def add_error_message(self, text: str) -> None:
         """添加一条错误消息"""
         error = Static(f"❌ {text}", classes="error-message")
         self.mount(error)
         self.scroll_end(animate=False)
-
-    def clear_ai_buffer(self) -> None:
-        """清空 AI 文本缓冲区（用于新一轮回复开始前）"""
-        self._ai_text_buffer = ""

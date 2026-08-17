@@ -33,6 +33,7 @@ class Session:
                     "role": msg.role.value,
                     "text": msg.text,
                     "thinking_text": msg.thinking_text,
+                    "thinking_signature": msg.thinking_signature,
                 }
                 for msg in self.messages
             ],
@@ -49,6 +50,7 @@ class Session:
                 role=Role(msg_data["role"]),
                 text=msg_data["text"],
                 thinking_text=msg_data.get("thinking_text"),
+                thinking_signature=msg_data.get("thinking_signature"),
             ))
 
         return cls(
