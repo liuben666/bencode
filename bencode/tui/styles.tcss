@@ -142,6 +142,84 @@ Screen {
     padding: 0 1;
 }
 
+/* 工具调用折叠卡片（必须 height: auto） */
+.tool-block {
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+.tool-block Collapsible {
+    border-left: thick $accent;
+    padding-left: 1;
+}
+
+.tool-block Collapsible CollapsibleTitle {
+    text-style: bold;
+}
+
+.tool-block.tool-running Collapsible {
+    border-left: thick $accent;
+}
+
+.tool-block.tool-running Collapsible CollapsibleTitle {
+    color: $accent;
+}
+
+.tool-block.tool-success Collapsible {
+    border-left: thick $success;
+}
+
+.tool-block.tool-success Collapsible CollapsibleTitle {
+    color: $success;
+}
+
+.tool-block.tool-error Collapsible,
+.tool-block.tool-timeout Collapsible {
+    border-left: thick $error;
+}
+
+.tool-block.tool-error Collapsible CollapsibleTitle,
+.tool-block.tool-timeout Collapsible CollapsibleTitle {
+    color: $error;
+}
+
+.tool-block.tool-rejected Collapsible {
+    border-left: thick $warning;
+}
+
+.tool-block.tool-rejected Collapsible CollapsibleTitle {
+    color: $warning;
+}
+
+.tool-block Collapsible .collapsible-content {
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* 危险操作确认条（挂在输入框上方，紧凑高度，不遮罩页面） */
+.confirm-bar {
+    height: 5;
+    max-height: 5;
+    padding: 0 1;
+    background: $warning 12%;
+    border-left: thick $warning;
+}
+
+.confirm-bar #confirm-info {
+    color: $text;
+    padding: 0 1;
+}
+
+.confirm-bar #confirm-actions {
+    height: 3;
+    padding: 0 1;
+    align: right middle;
+}
+
+.confirm-bar #confirm-allow-btn {
+    margin-right: 1;
+}
+
 /* 错误消息 */
 .error-message {
     color: $error;

@@ -19,6 +19,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from bencode.tui.widgets.thinking_block import ThinkingBlock
+from bencode.tui.widgets.tool_block import ToolBlock
 
 
 class MessageList(VerticalScroll):
@@ -32,6 +33,8 @@ class MessageList(VerticalScroll):
         self._current_ai_container: Vertical | None = None
         self._ai_text_buffer: str = ""  # 流式追加的文本缓冲区
         self._thinking_block: ThinkingBlock | None = None  # 当前 thinking 组件
+        # 全部工具卡片（按调用 ID 索引；跨轮次保留，供历史恢复/结果更新定位）
+        self._tool_blocks: dict[str, ToolBlock] = {}
 
     def add_user_message(self, text: str) -> None:
         """添加一条用户消息到列表"""
@@ -80,6 +83,25 @@ class MessageList(VerticalScroll):
             self._thinking_block.update_text(thinking_text)
         self.scroll_end(animate=False)
 
+    def add_tool_block(self, call_id: str, name: str, arguments: dict) -> ToolBlock | None:
+        """在当前 AI 回复中添加一张工具调用折叠卡片（初始为执行中状态）"""
+        if self._current_ai_container is None or self._current_ai_static is None:
+            return None
+        block = ToolBlock(call_id, name, arguments)
+        self._current_ai_container.mount(block, before=self._current_ai_static)
+        self._tool_blocks[call_id] = block
+        self.scroll_end(animate=False)
+        return block
+
+    def update_tool_block(
+        self, call_id: str, status: str, result_text: str, duration_ms: int = 0
+    ) -> None:
+        """按调用 ID 更新工具卡片的状态与结果（也用于历史会话恢复）"""
+        block = self._tool_blocks.get(call_id)
+        if block is not None:
+            block.set_result(status, result_text, duration_ms)
+            self.scroll_end(animate=False)
+
     def append_ai_text(self, text: str) -> None:
         """追加流式文本到当前 AI 回复
 
@@ -109,7 +131,16 @@ class MessageList(VerticalScroll):
         self._thinking_block = None
 
     def add_error_message(self, text: str) -> None:
-        """添加一条错误消息"""
+        """添加一条错误/提示消息到列表"""
         error = Static(f"❌ {text}", classes="error-message")
         self.mount(error)
         self.scroll_end(animate=False)
+
+    def clear(self) -> None:
+        """清空消息列表及内部状态（用于开启新对话）"""
+        self.remove_children()
+        self._current_ai_static = None
+        self._current_ai_container = None
+        self._ai_text_buffer = ""
+        self._thinking_block = None
+        self._tool_blocks = {}

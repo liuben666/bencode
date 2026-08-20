@@ -34,6 +34,15 @@ class Session:
                     "text": msg.text,
                     "thinking_text": msg.thinking_text,
                     "thinking_signature": msg.thinking_signature,
+                    "tool_calls": (
+                        [
+                            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                            for tc in msg.tool_calls
+                        ]
+                        if msg.tool_calls
+                        else None
+                    ),
+                    "tool_call_id": msg.tool_call_id,
                 }
                 for msg in self.messages
             ],
@@ -42,15 +51,28 @@ class Session:
     @classmethod
     def from_dict(cls, data: dict) -> "Session":
         """从字典反序列化为 Session 对象"""
-        from bencode.provider.base import Role
+        from bencode.provider.base import Role, ToolCall
 
         messages = []
         for msg_data in data.get("messages", []):
+            # 工具调用列表（旧版本会话文件无该字段，容忍缺失）
+            tool_calls = None
+            if msg_data.get("tool_calls"):
+                tool_calls = [
+                    ToolCall(
+                        id=tc["id"],
+                        name=tc["name"],
+                        arguments=tc.get("arguments") or {},
+                    )
+                    for tc in msg_data["tool_calls"]
+                ]
             messages.append(MessageContent(
                 role=Role(msg_data["role"]),
                 text=msg_data["text"],
                 thinking_text=msg_data.get("thinking_text"),
                 thinking_signature=msg_data.get("thinking_signature"),
+                tool_calls=tool_calls,
+                tool_call_id=msg_data.get("tool_call_id"),
             ))
 
         return cls(
